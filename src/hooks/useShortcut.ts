@@ -1,7 +1,6 @@
 import { useCallback } from "react";
 import * as GlobalShortcut from "@tauri-apps/plugin-global-shortcut";
 import { invoke } from "@tauri-apps/api/core";
-import { loadSettings } from "../store/settings";
 import { useSettings } from "./useSettings";
 
 type ShortcutTriggerState = {
@@ -11,7 +10,7 @@ type ShortcutTriggerState = {
 };
 
 export function useShortcut() {
-  const { get, set } = useSettings();
+  const { getAll, get, set } = useSettings();
 
   const register = useCallback(async (shortcut: string, callback: () => void) => {
     if (!shortcut) return;
@@ -29,7 +28,7 @@ export function useShortcut() {
 
   const init = useCallback(async () => {
     await GlobalShortcut.unregisterAll().catch(() => {});
-    const s = await loadSettings();
+    const s = await getAll();
 
     const reg = register;
     await reg(s.increaseSpeedShortcut as string, () => {
@@ -58,7 +57,7 @@ export function useShortcut() {
         set("speed", speed);
       });
     }
-  }, [register, set]);
+  }, [register, set, getAll]);
 
   return { register, unregister, init };
 }

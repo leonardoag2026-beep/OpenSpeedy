@@ -11,7 +11,7 @@ import WindowIcon from "@mui/icons-material/Window";
 import SearchIcon from "@mui/icons-material/Search";
 import MemoryIcon from "@mui/icons-material/Memory";
 import SpeedPanel from "./SpeedPanel";
-import { useSettings } from "../hooks/useSettings";
+import { useSpeed } from "../hooks/useSettings";
 
 // ── Types & constants ────────────────────────────────────────────────────
 
@@ -144,10 +144,7 @@ export default function ProcessManager() {
   const [search, setSearch] = useState("");
   const [icons, setIcons] = useState<Record<number, string>>({});
   const [speedMap, setSpeedMap] = useState<Map<number, SpeedState>>(new Map());
-  const { settings, set } = useSettings();
-  const [speed, setSpeed] = useState(1.0);
-  useEffect(() => { if (settings?.speed !== undefined) setSpeed(settings.speed as number); }, [settings?.speed]);
-  const handleSpeedCommit = useCallback((s: number) => { invoke("bridge_set_speed", { factor: s }); set("speed", s); }, [set]);
+  const { speed, setSpeed, commitSpeed } = useSpeed();
 
   // Derive enabled set for UI
   const enabled = useMemo(() => {
@@ -202,7 +199,7 @@ export default function ProcessManager() {
 
   return (
     <Box sx={{ height: "calc(100vh - 48px)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <SpeedPanel speed={speed} onChange={setSpeed} onCommit={handleSpeedCommit} />
+      <SpeedPanel speed={speed} onChange={setSpeed} onCommit={commitSpeed} />
       <ProcessTable
         processes={processes} filtered={filtered} search={search} onSearch={setSearch}
         icons={icons} enabled={enabled} onToggle={toggle}

@@ -153,7 +153,12 @@ const ProcessTable = function ProcessTable({
                     }}
                   >
                     <Typography variant="body2" color="text.secondary">{group.count}</Typography>
-                    <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>{name}</Typography>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1.2, minWidth: 0 }}>
+                      <ProcessIcon pid={group.pids[0]} icons={icons} />
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>{name}</Typography>
+                      </Box>
+                    </Box>
                     <Box sx={{ textAlign: "center" }}><Switch size="small" checked={group.anyEnabled} onChange={() => onToggleName(name)} /></Box>
                   </Box>
                 );

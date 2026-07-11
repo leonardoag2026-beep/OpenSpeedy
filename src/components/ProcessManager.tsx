@@ -226,23 +226,28 @@ export default function ProcessManager() {
   useEffect(() => { if (search.trim()) { invoke<ProcessInfo[]>("get_process_list").then(setProcesses).catch(() => {}); } }, [search]);
   useInterval(async () => { try { setProcesses(await invoke<ProcessInfo[]>("get_process_list_fast")); } catch {} }, 3000);
 
-  // Auto-inject saved process names on first load
-  useEffect(() => {
+  // Periodically inject saved process names
+  useInterval(async () => {
     if (processes.length === 0) return;
-    getAcceleratedNames().then(names => {
-      for (const name of names) {
-        const procs = processes.filter(p => p.name.toLowerCase() === name.toLowerCase());
-        if (procs.length > 0) {
-          const arch = procs[0].arch;
-          for (const p of procs) {
-            setSpeedMap(prev => { const n = new Map(prev); n.set(p.pid, { injected: true, enabled: true, arch }); return n; });
-          }
-          // Inject one PID as representative
-          invoke<boolean>("bridge_inject", { pid: procs[0].pid, arch }).catch(() => {});
+    const names = await getAcceleratedNames();
+    for (const name of names) {
+      const procs = processes.filter(p =>
+        p.name.toLowerCase() === name.toLowerCase() && !speedMap.get(p.pid)?.enabled
+      );
+      if (procs.length === 0) continue;
+      const arch = procs[0].arch;
+      setSpeedMap(prev => {
+        const n = new Map(prev);
+        for (const p of procs) {
+          n.set(p.pid, { injected: true, enabled: true, arch });
         }
+        return n;
+      });
+      for (const p of procs) {
+        invoke<boolean>("bridge_inject", { pid: p.pid, arch }).catch(() => {});
       }
-    });
-  }, [processes.length > 0]); // eslint-disable-line
+    }
+  }, 5000);
 
   // Filter
   const filtered = useMemo(() => {

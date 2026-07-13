@@ -2,15 +2,15 @@ import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Box, Paper, Typography, Slider, ButtonBase } from "@mui/material";
 import SpeedIcon from "@mui/icons-material/Speed";
-// ── Speed mapping: slider [-999, 999] → speed [0.001, 1000], 1× at 0 ──
+// ── Logarithmic speed mapping: slider [-1000, 1000] → speed [0.001, 1000] ──
+// 0 = 1×, full right = 1000×, full left = 0.001×
+// speed = 10^(v * 3 / 1000)
 
 export function toSpeed(v: number): number {
-  if (v <= 0) { return 1 + v * 0.001; }
-  else        { return 1 + v; }
+  return Math.pow(10, v);
 }
 export function toSlider(s: number): number {
-  if (s <= 1.0) return (s - 1) / 0.001;
-  else          return s - 1;
+  return Math.log10(s);
 }
 
 interface SpeedPanelProps {
@@ -25,11 +25,11 @@ export default React.memo(function SpeedPanel({ speed, gears, onChange, onCommit
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState("");
 
-  const active = (g: number) => Math.abs(speed - g) < 0.001;
+    const active = (g: number) => Math.abs(speed - g) < 0.001;
   const speedColor = speed > 1.01 ? "secondary.main" : speed < 0.99 ? "warning.main" : "primary.main";
 
   function beginEdit() {
-    setEditVal(speed.toFixed(2));
+    setEditVal(speed.toFixed(3));
     setEditing(true);
   }
 
@@ -93,20 +93,32 @@ export default React.memo(function SpeedPanel({ speed, gears, onChange, onCommit
               fontWeight: 800, fontVariantNumeric: "tabular-nums", lineHeight: 1,
               color: speedColor, display: "inline",
             }}>
-              {speed.toFixed(2)}
+              {speed.toFixed(3)}
             </Typography>
             <Typography component="span" variant="h5" sx={{ fontWeight: 600, color: "text.secondary", display: "inline" }}>×</Typography>
           </Box>
         )}
 
-        <Slider
-          value={toSlider(speed)}
-          onChange={(_, v) => onChange(toSpeed(v as number))}
-          onChangeCommitted={(_, v) => onCommit(toSpeed(v as number))}
-          min={-999} max={999} step={1}
-          size="small"
-          sx={{ color: speedColor, mb: 0.5 }}
-        />
+        <Box sx={{ display: "flex", justifyContent: "center", mb: 0.5, }}>
+          <Slider
+            value={toSlider(speed)}
+            onChange={(_, v) => onChange(toSpeed(v as number))}
+            onChangeCommitted={(_, v) => onCommit(toSpeed(v as number))}
+            min={-3} max={3} step={0.01}
+            marks={[
+              { value: -3, label: "0.001" },
+              { value: -2, label: "0.01" },
+              { value: -1, label: "0.1" },
+              { value: 0, label: "1×" },
+              { value: 1, label: "10" },
+              { value: 2, label: "100" },
+              { value: 3, label: "1000" },
+            ]}
+            valueLabelFormat={v => toSpeed(v).toFixed(3)}
+            size="small"
+            sx={{ color: speedColor, width: "88%" }}
+          />
+        </Box>
       </Box>
 
       {/* ── Reset ── */}

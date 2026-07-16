@@ -192,8 +192,8 @@ export default function SettingsManager() {
                   value={settings?.holdShortcut as string}
                   onChange={v => {
                     const old = settings?.holdShortcut as string;
-                    const hs = (get("holdSpeed") as number) || 2.0;
                     changeHoldShortcut(old, v, () => {
+                      const hs = (get("holdSpeed") as number) || 2.0;
                       invoke("bridge_set_speed", { factor: hs });
                       set("speed", hs);
                     }, () => {

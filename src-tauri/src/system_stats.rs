@@ -1,4 +1,9 @@
-use std::sync::{Mutex, OnceLock};
+use std::os::windows::process::CommandExt;
+use std::process::Command;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex, OnceLock,
+};
 
 use serde::Serialize;
 use windows::Win32::Foundation::FILETIME;
@@ -77,6 +82,78 @@ struct CpuSnapshot {
 
 static CPU_PREV: Mutex<Option<CpuSnapshot>> = Mutex::new(None);
 
+// `hypomnesis` normally falls back to spawning nvidia-smi. Its subprocess is
+// not created with CREATE_NO_WINDOW, so Windows Terminal can briefly appear on
+// systems with a stale NVIDIA driver but no usable NVIDIA GPU. Keep the
+// fallback under our control so it is hidden and stop retrying after a failure.
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+static NVIDIA_SMI_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
+static NVIDIA_SMI_QUERY_LOCK: Mutex<()> = Mutex::new(());
+
+fn gpu_stats() -> Option<GpuStats> {
+    let native = hypomnesis::Snapshot::now(0).ok().and_then(|snap| {
+        snap.gpu_device.map(|dev| GpuStats {
+            name: dev.name.unwrap_or_default(),
+            used_mb: dev.total_bytes.saturating_sub(dev.free_bytes) / (1024 * 1024),
+            total_mb: dev.total_bytes / (1024 * 1024),
+        })
+    });
+
+    native.or_else(nvidia_smi_gpu_stats)
+}
+
+fn nvidia_smi_gpu_stats() -> Option<GpuStats> {
+    if NVIDIA_SMI_UNAVAILABLE.load(Ordering::Acquire) {
+        return None;
+    }
+
+    let _query_guard = NVIDIA_SMI_QUERY_LOCK.lock().ok()?;
+    if NVIDIA_SMI_UNAVAILABLE.load(Ordering::Acquire) {
+        return None;
+    }
+
+    let mut command = Command::new("nvidia-smi");
+    command.creation_flags(CREATE_NO_WINDOW);
+    let stats = command
+        .args([
+            "--query-gpu=name,memory.used,memory.total",
+            "--format=csv,noheader,nounits",
+            "--id=0",
+        ])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| parse_nvidia_smi_output(&output.stdout));
+
+    if stats.is_none() {
+        NVIDIA_SMI_UNAVAILABLE.store(true, Ordering::Release);
+    }
+
+    stats
+}
+
+fn parse_nvidia_smi_output(output: &[u8]) -> Option<GpuStats> {
+    let line = std::str::from_utf8(output)
+        .ok()?
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
+    let mut fields = line.rsplitn(3, ',').map(str::trim);
+    let total_mb = fields.next()?.parse().ok()?;
+    let used_mb = fields.next()?.parse().ok()?;
+    let name = fields.next()?;
+
+    if name.is_empty() || total_mb == 0 || used_mb > total_mb {
+        return None;
+    }
+
+    Some(GpuStats {
+        name: name.to_owned(),
+        used_mb,
+        total_mb,
+    })
+}
+
 pub fn get_system_stats() -> SystemStats {
     // Memory
     let mut mem = MEMORYSTATUSEX {
@@ -121,17 +198,43 @@ pub fn get_system_stats() -> SystemStats {
     };
 
     // GPU
-    let gpu = hypomnesis::Snapshot::now(0).ok().and_then(|snap| {
-        snap.gpu_device.map(|dev| GpuStats {
-            name: dev.name.unwrap_or_default(),
-            used_mb: (dev.total_bytes - dev.free_bytes) / (1024 * 1024),
-            total_mb: dev.total_bytes / (1024 * 1024),
-        })
-    });
+    let gpu = gpu_stats();
 
     SystemStats { memory_pct, cpu_pct, os_version: os_version(), gpu }
 }
 
 fn ft_to_u64(ft: &FILETIME) -> u64 {
     ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_nvidia_smi_output;
+
+    #[test]
+    fn parses_nvidia_smi_gpu_stats() {
+        let stats = parse_nvidia_smi_output(b"NVIDIA GeForce RTX 4070, 1536, 12282\r\n")
+            .expect("valid nvidia-smi output should parse");
+
+        assert_eq!(stats.name, "NVIDIA GeForce RTX 4070");
+        assert_eq!(stats.used_mb, 1536);
+        assert_eq!(stats.total_mb, 12282);
+    }
+
+    #[test]
+    fn parses_gpu_name_containing_a_comma() {
+        let stats = parse_nvidia_smi_output(b"NVIDIA Test, Adapter, 256, 8192\n")
+            .expect("the final two comma-separated fields are memory values");
+
+        assert_eq!(stats.name, "NVIDIA Test, Adapter");
+        assert_eq!(stats.used_mb, 256);
+        assert_eq!(stats.total_mb, 8192);
+    }
+
+    #[test]
+    fn rejects_invalid_nvidia_smi_output() {
+        assert!(parse_nvidia_smi_output(b"").is_none());
+        assert!(parse_nvidia_smi_output(b"permission denied").is_none());
+        assert!(parse_nvidia_smi_output(b"GPU, 9000, 8000").is_none());
+    }
 }
